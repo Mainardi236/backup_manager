@@ -1,0 +1,45 @@
+import os
+import shutil
+from datetime import datetime, timedelta
+from time import sleep
+
+origem = r"C:\mainardi\coding\sistema_backup_teste\origem"
+backup = r"Z:\backup_teste"
+
+dias_limite = 10
+
+
+def copiar_pastas():
+
+    for pasta in os.listdir(origem):
+
+        origem_pasta = os.path.join(origem, pasta)
+        destino_pasta = os.path.join(backup, pasta)
+
+        if os.path.isdir(origem_pasta):
+
+            shutil.copytree(origem_pasta, destino_pasta, dirs_exist_ok=True)
+
+            print("Pasta sincronizada:", pasta)
+
+
+def apagar_antigos():
+
+    agora = datetime.now()
+
+    for pasta in os.listdir(backup):
+
+        caminho = os.path.join(backup, pasta)
+
+        data_mod = datetime.fromtimestamp(os.path.getmtime(caminho))
+
+        if agora - data_mod > timedelta(days=dias_limite):
+
+            shutil.rmtree(caminho)
+
+            print("Pasta removida:", pasta)
+
+while True:
+    copiar_pastas()
+    apagar_antigos()
+    sleep(43200)  # espera 12 horas
