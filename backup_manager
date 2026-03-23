@@ -1,45 +1,104 @@
 import os
-import shutil
-from datetime import datetime, timedelta
-from time import sleep
+import subprocess
+import datetime
+import time
 
-origem = r"C:\mainardi\coding\sistema_backup_teste\origem"
-backup = r"Z:\backup_teste"
+# ===== CONFIG =====
 
-dias_limite = 10
+origem_base = r"\\192.168.0.250\backup"
+destino_base = r"\\192.168.0.150\d$\Backup Totvs"
+
+pastas = [
+    "master",
+    "msdb",
+    "model",
+    "sigaoficial",
+    "sigaoficialtss"
+]
+
+log_file = "backup_log.txt"
+
+# ===== LOG =====
+
+def log(msg):
+    agora = datetime.datetime.now()
+    linha = f"{agora} - {msg}"
+    print(linha)
+
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(linha + "\n")
 
 
-def copiar_pastas():
+# ===== COPIA COM ROBOCOPY =====
 
-    for pasta in os.listdir(origem):
+def copiar_arquivo(origem, destino, arquivo):
 
-        origem_pasta = os.path.join(origem, pasta)
-        destino_pasta = os.path.join(backup, pasta)
+    origem_dir = origem
+    destino_dir = destino
 
-        if os.path.isdir(origem_pasta):
+    comando = [
+        "robocopy",
+        origem_dir,
+        destino_dir,
+        arquivo,
+        "/R:3",
+        "/W:5",
+        "/Z",
+        "/NFL",
+        "/NDL",
+        "/NJH",
+        "/NJS"
+    ]
 
-            shutil.copytree(origem_pasta, destino_pasta, dirs_exist_ok=True)
+    resultado = subprocess.run(comando, capture_output=True)
 
-            print("Pasta sincronizada:", pasta)
+    return resultado.returncode
 
 
-def apagar_antigos():
+# ===== EXECUÇÃO =====
 
-    agora = datetime.now()
+log("-----------------------------------------------------")
+log("Iniciando verificação")
 
-    for pasta in os.listdir(backup):
+for pasta in pastas:
 
-        caminho = os.path.join(backup, pasta)
+    origem = os.path.join(origem_base, pasta)
+    destino = os.path.join(destino_base, pasta)
 
-        data_mod = datetime.fromtimestamp(os.path.getmtime(caminho))
+    os.makedirs(destino, exist_ok=True)
 
-        if agora - data_mod > timedelta(days=dias_limite):
+    try:
+        arquivos = os.listdir(origem)
+    except:
+        log(f"Erro acessando pasta {pasta}")
+        continue
 
-            shutil.rmtree(caminho)
+    for arquivo in arquivos:
 
-            print("Pasta removida:", pasta)
+        if not arquivo.lower().endswith(".bak"):
+            continue
 
-while True:
-    copiar_pastas()
-    apagar_antigos()
-    sleep(43200)  # espera 12 horas
+        origem_arq = os.path.join(origem, arquivo)
+        destino_arq = os.path.join(destino, arquivo)
+
+        if os.path.exists(destino_arq):
+            continue
+
+        log(f"[{pasta}] Copiando {arquivo}")
+
+        codigo = copiar_arquivo(origem, destino, arquivo)
+
+        if codigo <= 3:
+            log(f"[{pasta}] Cópia confirmada: {arquivo}")
+
+            try:
+                os.remove(origem_arq)
+                log(f"Removido da origem: {arquivo}")
+            except Exception as e:
+                log(f"Erro ao remover {arquivo}: {e}")
+
+        else:
+            log(f"[{pasta}] Falha na cópia: {arquivo}")
+
+log("Execução finalizada")
+log("-----------------------------------------------------")
