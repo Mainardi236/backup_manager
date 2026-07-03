@@ -33,6 +33,16 @@ DEFAULT_SETTINGS = {
     "smtp_provider": "Personalizado"
 }
 
+# ===== PALETA ESCURA =====
+PALETTE_BG = "#1b1d1f"
+PALETTE_PANEL = "#1b1d1f"
+PALETTE_TEXT = "#e6e9ff"
+PALETTE_MUTED = "#99a8d9"
+PALETTE_ACCENT = "#3f5cc8"
+PALETTE_ACCENT_HOVER = "#334fa3"
+PALETTE_SECONDARY = "#141617"
+PALETTE_SECONDARY_HOVER = "#37476a"
+
 
 def load_settings():
     try:
@@ -68,7 +78,7 @@ app.iconbitmap(r"C:\backup_manager\leao_preto.ico")
 
 # ===== FUNDO PRETO =====
 
-frame = ctk.CTkFrame(app, fg_color="black")
+frame = ctk.CTkFrame(app, fg_color=PALETTE_BG)
 frame.pack(fill="both", expand=True)
 
 # ===== CABEÇALHO =====
@@ -87,7 +97,7 @@ logo.grid(row=0, column=0, sticky="w", padx=(0, 10))
 titulo = ctk.CTkLabel(
     header_frame,
     text="CONTROLE DE BACKUP",
-    text_color="#2596be",
+    text_color=PALETTE_ACCENT,
     font=("Arial",24,"bold")
 )
 
@@ -143,7 +153,10 @@ botao1 = ctk.CTkButton(
     button_group,
     text="Executar Backup Manual",
     command=lambda: rodar(r"C:\backup_manager\backup_manager_total.py"),
-    width=420
+    width=420,
+    fg_color=PALETTE_ACCENT,
+    hover_color=PALETTE_ACCENT_HOVER,
+    text_color=PALETTE_TEXT
 )
 
 botao1.pack(fill="x", pady=8)
@@ -153,7 +166,10 @@ botao2 = ctk.CTkButton(
     button_group,
     text="Executar Backup Auto",
     command=lambda: rodar(r"C:\backup_manager\backup_auto.py"),
-    width=420
+    width=420,
+    fg_color=PALETTE_ACCENT,
+    hover_color=PALETTE_ACCENT_HOVER,
+    text_color=PALETTE_TEXT
 )
 
 botao2.pack(fill="x", pady=8)
@@ -163,7 +179,10 @@ botao3 = ctk.CTkButton(
     button_group,
     text="Executar Backup Loop",
     command=lambda: rodar(r"C:\backup_manager\backup_loop.ps1"),
-    width=420
+    width=420,
+    fg_color=PALETTE_ACCENT,
+    hover_color=PALETTE_ACCENT_HOVER,
+    text_color=PALETTE_TEXT
 )
 
 botao3.pack(fill="x", pady=8)
@@ -183,7 +202,10 @@ botao4 = ctk.CTkButton(
     button_group,
     text="Ver Log",
     command=lambda: rodar(r"C:\backup_manager\backup_log.txt") if log_enabled else None,
-    width=420
+    width=420,
+    fg_color=PALETTE_SECONDARY,
+    hover_color=PALETTE_SECONDARY_HOVER,
+    text_color=PALETTE_TEXT
 )
 
 botao4.pack(fill="x", pady=8)
@@ -206,7 +228,7 @@ def abrir_settings():
     settings_window.minsize(500, 600)
     settings_window.iconbitmap(r"C:\backup_manager\leao_preto.ico")
     
-    settings_frame = ctk.CTkScrollableFrame(settings_window, fg_color="black")
+    settings_frame = ctk.CTkScrollableFrame(settings_window, fg_color=PALETTE_PANEL)
     settings_frame.pack(fill="both", expand=True, padx=10, pady=10)
     settings_frame.grid_columnconfigure(0, weight=1)
     
@@ -214,7 +236,7 @@ def abrir_settings():
     titulo_settings = ctk.CTkLabel(
         settings_frame,
         text="CONFIGURAÇÕES",
-        text_color="#2596be",
+        text_color=PALETTE_ACCENT,
         font=("Arial", 20, "bold")
     )
     titulo_settings.pack(pady=15)
@@ -223,7 +245,7 @@ def abrir_settings():
     label_backup_path = ctk.CTkLabel(
         settings_frame,
         text="Local de Backup:",
-        text_color="white",
+        text_color=PALETTE_TEXT,
         font=("Arial", 12, "bold")
     )
     label_backup_path.pack(anchor="w", padx=20, pady=(10, 5))
@@ -235,7 +257,7 @@ def abrir_settings():
     label_destination_path = ctk.CTkLabel(
         settings_frame,
         text="Destino de Backup:",
-        text_color="white",
+        text_color=PALETTE_TEXT,
         font=("Arial", 12, "bold")
     )
     label_destination_path.pack(anchor="w", padx=20, pady=(10, 5))
@@ -500,7 +522,7 @@ def abrir_settings():
         text="Escolha um provedor para preencher as configurações básicas automaticamente."
              " Para Locaweb use 'Locaweb', depois informe usuário e senha."
              "",
-        text_color="#cccccc",
+        text_color=PALETTE_MUTED,
         font=("Arial", 10),
         wraplength=440,
         justify="left"
@@ -691,7 +713,10 @@ def abrir_settings():
     test_email_button = ctk.CTkButton(
         settings_frame,
         text="Enviar E-mail de Teste",
-        command=send_test_email
+        command=send_test_email,
+        fg_color=PALETTE_ACCENT,
+        hover_color=PALETTE_ACCENT_HOVER,
+        text_color=PALETTE_TEXT
     )
     test_email_button.pack(fill="x", padx=20, pady=(0, 20))
 
@@ -745,8 +770,9 @@ def abrir_settings():
         button_frame,
         text="Salvar",
         width=120,
-        fg_color="#2596be",
-        hover_color="#1a6fa5",
+        fg_color=PALETTE_ACCENT,
+        hover_color=PALETTE_ACCENT_HOVER,
+        text_color=PALETTE_TEXT,
         command=save_settings
     )
     botao_salvar.pack(side="left", padx=10)
@@ -755,8 +781,9 @@ def abrir_settings():
         button_frame,
         text="Cancelar",
         width=120,
-        fg_color="#666666",
-        hover_color="#555555",
+        fg_color=PALETTE_SECONDARY,
+        hover_color=PALETTE_SECONDARY_HOVER,
+        text_color=PALETTE_TEXT,
         command=settings_window.destroy
     )
     botao_cancelar.pack(side="left", padx=10)
@@ -766,8 +793,9 @@ botao_settings = ctk.CTkButton(
     button_container,
     text="Configurações",
     command=abrir_settings,
-    fg_color="#2596be",
-    hover_color="#1a6fa5"
+    fg_color=PALETTE_ACCENT,
+    hover_color=PALETTE_ACCENT_HOVER,
+    text_color=PALETTE_TEXT
 )
 
 botao_settings.pack(fill="x", pady=8)
