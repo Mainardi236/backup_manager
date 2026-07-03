@@ -3,23 +3,68 @@ import subprocess
 import datetime
 import time
 import threading
+import json
+import smtplib
+from email.message import EmailMessage
 from concurrent.futures import ThreadPoolExecutor
 
 # ===== CONFIG =====
 
-origem_base = r"\\192.168.0.250\backup"
-destino_base = r"\\192.168.0.150\d$\Backup Totvs"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SETTINGS_FILE = os.path.join(BASE_DIR, "backup_settings.json")
 
-pastas = [
-    "master",
-    "msdb",
-    "model",
-    "sigaoficialtss",
-    "sigaoficial"
-]
+DEFAULT_SETTINGS = {
+    "backup_source_path": r"\\192.168.0.250\\backup",
+    "backup_destination_path": r"\\192.168.0.150\\d$\\Backup Totvs",
+    "backup_folders": ["master", "msdb", "model", "sigaoficialtss", "sigaoficial"],
+    "copy_everything": False,
+    "email_enabled": False,
+    "sender_email": "",
+    "recipient_email": "",
+    "email_mode": "always",
+    "smtp_host": "localhost",
+    "smtp_port": 25,
+    "smtp_username": "",
+    "smtp_password": "",
+    "smtp_security": "none"
+}
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            settings = json.load(f)
+    except Exception:
+        settings = DEFAULT_SETTINGS.copy()
+
+    for key, value in DEFAULT_SETTINGS.items():
+        settings.setdefault(key, value)
+
+    return settings
+
+
+settings = load_settings()
+origem_base = settings.get("backup_source_path", DEFAULT_SETTINGS["backup_source_path"])
+destino_base = settings.get("backup_destination_path", DEFAULT_SETTINGS["backup_destination_path"])
+copy_everything = settings.get("copy_everything", False)
+backup_folders = settings.get("backup_folders", DEFAULT_SETTINGS["backup_folders"])
+pastas = ["Tudo"] if copy_everything else backup_folders
 
 log_file = "backup_log.txt"
 tempo_espera = 60
+
+email_enabled = settings.get("email_enabled", False)
+sender_email = settings.get("sender_email", "")
+recipient_email = settings.get("recipient_email", "")
+email_mode = settings.get("email_mode", "always")
+
+smtp_host = settings.get("smtp_host", DEFAULT_SETTINGS["smtp_host"])
+try:
+    smtp_port = int(settings.get("smtp_port", DEFAULT_SETTINGS["smtp_port"]))
+except (TypeError, ValueError):
+    smtp_port = DEFAULT_SETTINGS["smtp_port"]
+smtp_username = settings.get("smtp_username", "")
+smtp_password = settings.get("smtp_password", "")
+smtp_security = settings.get("smtp_security", "none")
 
 # ===== ANSI COLORS =====
 
@@ -51,6 +96,49 @@ def limpar_log_se_grande(max_mb=5):
         if tamanho > max_mb:
             with open(log_file, "w", encoding="utf-8") as f:
                 f.write("Log reiniciado\n")
+
+
+def enviar_email_assunto_corpo(assunto, corpo):
+    if not email_enabled or not sender_email or not recipient_email:
+        return
+
+    try:
+        msg = EmailMessage()
+        msg["From"] = sender_email
+        msg["To"] = recipient_email
+        msg["Subject"] = assunto
+        msg.set_content(corpo)
+
+        if smtp_security == "ssl":
+            smtp = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30)
+        else:
+            smtp = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
+            if smtp_security == "starttls":
+                smtp.starttls()
+
+        with smtp:
+            if smtp_username and smtp_password:
+                smtp.login(smtp_username, smtp_password)
+            smtp.send_message(msg)
+    except Exception as e:
+        log(f"Falha ao enviar e-mail: {e}")
+
+
+def enviar_email_resumo(status_geral):
+    if not email_enabled:
+        return
+
+    if email_mode == "failed" and status_geral == "OK":
+        return
+
+    assunto = "Backup concluído" if status_geral == "OK" else "Backup com falha"
+    corpo = f"Status geral do backup: {status_geral}\n\nLogs recentes:\n"
+
+    if os.path.exists(log_file):
+        with open(log_file, "r", encoding="utf-8") as f:
+            corpo += f.read()[-2000:]
+
+    enviar_email_assunto_corpo(assunto, corpo)
 
 
 # ===== LOG =====
@@ -119,26 +207,41 @@ def limpar_antigos(base_path, dias=5):
     agora = time.time()
     limite = dias * 86400
 
-    for pasta in pastas:
+    if copy_everything:
+        for raiz, _, arquivos in os.walk(base_path):
+            for arquivo in arquivos:
+                if not arquivo.lower().endswith(".bak"):
+                    continue
 
-        caminho = os.path.join(base_path, pasta)
+                caminho_arquivo = os.path.join(raiz, arquivo)
 
-        if not os.path.exists(caminho):
-            continue
+                if agora - os.path.getmtime(caminho_arquivo) >= limite:
+                    try:
+                        os.remove(caminho_arquivo)
+                        log(f"[Todos] removido antigo {arquivo}")
+                    except:
+                        pass
+    else:
+        for pasta in pastas:
 
-        for arquivo in os.listdir(caminho):
+            caminho = os.path.join(base_path, pasta)
 
-            if not arquivo.lower().endswith(".bak"):
+            if not os.path.exists(caminho):
                 continue
 
-            caminho_arquivo = os.path.join(caminho, arquivo)
+            for arquivo in os.listdir(caminho):
 
-            if agora - os.path.getmtime(caminho_arquivo) >= limite:
-                try:
-                    os.remove(caminho_arquivo)
-                    log(f"[{pasta}] removido antigo {arquivo}")
-                except:
-                    pass
+                if not arquivo.lower().endswith(".bak"):
+                    continue
+
+                caminho_arquivo = os.path.join(caminho, arquivo)
+
+                if agora - os.path.getmtime(caminho_arquivo) >= limite:
+                    try:
+                        os.remove(caminho_arquivo)
+                        log(f"[{pasta}] removido antigo {arquivo}")
+                    except:
+                        pass
 
 
 # ===== ROBOCOPY =====
@@ -180,14 +283,62 @@ def copiar_arquivo(origem, destino, arquivo, pasta):
     return processo.returncode
 
 
+def copiar_pasta_completa(origem, destino, pasta):
+    comando = [
+        "robocopy",
+        origem,
+        destino,
+        "/E",
+        "/R:3",
+        "/W:5",
+        "/Z",
+        "/ETA"
+    ]
+
+    processo = subprocess.Popen(
+        comando,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True
+    )
+
+    for linha in processo.stdout:
+        with lock:
+            progresso[pasta]["status"] = f"Copiando {pasta}"
+
+    processo.wait()
+    return processo.returncode
+
+
 # ===== PROCESSAMENTO =====
 
 def processar_pasta(pasta):
 
-    origem = os.path.join(origem_base, pasta)
-    destino = os.path.join(destino_base, pasta)
+    if copy_everything and pasta == "Tudo":
+        origem = origem_base
+        destino = destino_base
+    else:
+        origem = os.path.join(origem_base, pasta)
+        destino = os.path.join(destino_base, pasta)
 
     os.makedirs(destino, exist_ok=True)
+
+    if copy_everything:
+        with lock:
+            progresso[pasta]["pct"] = 0
+            progresso[pasta]["status"] = f"Iniciando {pasta}"
+
+        codigo = copiar_pasta_completa(origem, destino, pasta)
+
+        if codigo <= 3:
+            with lock:
+                progresso[pasta]["status"] = "OK"
+                progresso[pasta]["pct"] = 100
+        else:
+            with lock:
+                progresso[pasta]["status"] = "Erro cópia"
+
+        return
 
     try:
         arquivos = os.listdir(origem)
@@ -247,11 +398,15 @@ def executar():
         with ThreadPoolExecutor(max_workers=3) as executor:
             executor.map(processar_pasta, pastas)
 
+        status_geral = "OK"
         with lock:
             for p in pastas:
+                if "Erro" in progresso[p]["status"]:
+                    status_geral = "Falha"
                 progresso[p]["status"] = "Aguardando"
                 progresso[p]["pct"] = 0
 
+        enviar_email_resumo(status_geral)
         time.sleep(tempo_espera)
 
 
