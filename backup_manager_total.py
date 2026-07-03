@@ -99,36 +99,70 @@ def limpar_log_se_grande(max_mb=5):
 
 
 def enviar_email_assunto_corpo(assunto, corpo):
-    if not email_enabled or not sender_email or not recipient_email:
+    # reload settings so long-running process picks up GUI changes
+    s = load_settings()
+    enabled = s.get("email_enabled", False)
+    sender = s.get("sender_email", "")
+    recipient = s.get("recipient_email", "")
+    if not enabled or not sender or not recipient:
         return
 
+    smtp_h = s.get("smtp_host", DEFAULT_SETTINGS.get("smtp_host", "localhost"))
     try:
+        smtp_p = int(s.get("smtp_port", DEFAULT_SETTINGS.get("smtp_port", 25)))
+    except (TypeError, ValueError):
+        smtp_p = DEFAULT_SETTINGS.get("smtp_port", 25)
+    smtp_user = s.get("smtp_username", "")
+    smtp_pass = s.get("smtp_password", "")
+    smtp_sec = s.get("smtp_security", "none")
+    smtp_provider = s.get("smtp_provider", "Personalizado")
+    try:
+        log(f"Tentando enviar e-mail SMTP: host={smtp_h} port={smtp_p} security={smtp_sec} provider={smtp_provider} user_set={bool(smtp_user)}")
         msg = EmailMessage()
-        msg["From"] = sender_email
-        msg["To"] = recipient_email
+        effective_sender = sender
+        if smtp_provider == "Locaweb" and smtp_username and sender.lower() != smtp_username.lower():
+            log(f"Loaweb provider: usando remetente SMTP autenticado em vez de {sender}")
+            effective_sender = smtp_username
+        msg["From"] = effective_sender
+        msg["To"] = recipient
         msg["Subject"] = assunto
         msg.set_content(corpo)
 
-        if smtp_security == "ssl":
-            smtp = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30)
+        if smtp_sec == "ssl":
+            smtp = smtplib.SMTP_SSL(smtp_h, smtp_p, timeout=30)
         else:
-            smtp = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
-            if smtp_security == "starttls":
+            smtp = smtplib.SMTP(smtp_h, smtp_p, timeout=30)
+            try:
+                smtp.ehlo()
+            except Exception:
+                pass
+            if smtp_sec == "starttls":
                 smtp.starttls()
+                try:
+                    smtp.ehlo()
+                except Exception:
+                    pass
 
         with smtp:
-            if smtp_username and smtp_password:
-                smtp.login(smtp_username, smtp_password)
+            if smtp_user and smtp_pass:
+                smtp.login(smtp_user, smtp_pass)
             smtp.send_message(msg)
+        log("E-mail enviado com sucesso.")
     except Exception as e:
         log(f"Falha ao enviar e-mail: {e}")
+        raise
 
 
 def enviar_email_resumo(status_geral):
-    if not email_enabled:
+    s = load_settings()
+    enabled = s.get("email_enabled", False)
+    if not enabled:
+        log("E-mail desativado nas configurações; não enviando resumo.")
         return
 
-    if email_mode == "failed" and status_geral == "OK":
+    email_mode_local = s.get("email_mode", "always")
+    if email_mode_local == "failed" and status_geral == "OK":
+        log("E-mail configurado para enviar apenas em falhas; sem envio de resumo OK.")
         return
 
     assunto = "Backup concluído" if status_geral == "OK" else "Backup com falha"
