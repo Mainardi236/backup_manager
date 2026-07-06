@@ -5,6 +5,8 @@ import time
 import threading
 import json
 import smtplib
+import sys
+import argparse
 from email.message import EmailMessage
 from concurrent.futures import ThreadPoolExecutor
 
@@ -86,6 +88,9 @@ lock = threading.Lock()
 
 # ===== UTIL =====
 
+def emit(msg):
+    print(msg, flush=True)
+
 def limpar_tela():
     os.system('cls' if os.name == 'nt' else 'clear')
 
@@ -121,7 +126,7 @@ def enviar_email_assunto_corpo(assunto, corpo):
         msg = EmailMessage()
         effective_sender = sender
         if smtp_provider == "Locaweb" and smtp_username and sender.lower() != smtp_username.lower():
-            log(f"Loaweb provider: usando remetente SMTP autenticado em vez de {sender}")
+            log(f"Locaweb provider: usando remetente SMTP autenticado em vez de {sender}")
             effective_sender = smtp_username
         msg["From"] = effective_sender
         msg["To"] = recipient
@@ -184,6 +189,8 @@ def log(msg):
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(linha + "\n")
 
+    emit(linha)
+
 
 # ===== COR POR STATUS =====
 
@@ -236,6 +243,14 @@ def desenhar_painel():
 
 # ===== LIMPEZA =====
 
+def listar_arquivos_para_copiar(base_path):
+    arquivos = []
+    for raiz, _, nomes_arquivos in os.walk(base_path):
+        for nome_arquivo in nomes_arquivos:
+            arquivos.append(os.path.join(raiz, nome_arquivo))
+    return arquivos
+
+
 def limpar_antigos(base_path, dias=5):
 
     agora = time.time()
@@ -244,17 +259,14 @@ def limpar_antigos(base_path, dias=5):
     if copy_everything:
         for raiz, _, arquivos in os.walk(base_path):
             for arquivo in arquivos:
-                if not arquivo.lower().endswith(".bak"):
-                    continue
-
                 caminho_arquivo = os.path.join(raiz, arquivo)
 
                 if agora - os.path.getmtime(caminho_arquivo) >= limite:
                     try:
                         os.remove(caminho_arquivo)
                         log(f"[Todos] removido antigo {arquivo}")
-                    except:
-                        pass
+                    except Exception as exc:
+                        log(f"[Todos] falha ao remover {arquivo}: {exc}")
     else:
         for pasta in pastas:
 
@@ -264,84 +276,113 @@ def limpar_antigos(base_path, dias=5):
                 continue
 
             for arquivo in os.listdir(caminho):
-
-                if not arquivo.lower().endswith(".bak"):
-                    continue
-
                 caminho_arquivo = os.path.join(caminho, arquivo)
+
+                if not os.path.isfile(caminho_arquivo):
+                    continue
 
                 if agora - os.path.getmtime(caminho_arquivo) >= limite:
                     try:
                         os.remove(caminho_arquivo)
                         log(f"[{pasta}] removido antigo {arquivo}")
-                    except:
-                        pass
+                    except Exception as exc:
+                        log(f"[{pasta}] falha ao remover {arquivo}: {exc}")
 
 
 # ===== ROBOCOPY =====
 
+def build_robocopy_command(origem, destino, arquivo=None, move_files=False, recursive=False):
+    comando = ["robocopy", origem, destino]
+
+    if arquivo:
+        comando.append(arquivo)
+
+    if recursive:
+        comando.append("/E")
+
+    if move_files:
+        comando.append("/MOV")
+
+    comando.extend(["/R:3", "/W:5", "/Z", "/ETA"])
+    return comando
+
+
 def copiar_arquivo(origem, destino, arquivo, pasta):
 
-    comando = [
-        "robocopy",
-        origem,
-        destino,
-        arquivo,
-        "/R:3",
-        "/W:5",
-        "/Z",
-        "/ETA"
-    ]
+    comando = build_robocopy_command(origem, destino, arquivo=arquivo)
 
     processo = subprocess.Popen(
         comando,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True
+        text=True,
+        bufsize=1
     )
 
-    for linha in processo.stdout:
+    if processo.stdout:
+        for linha in processo.stdout:
+            if "%" in linha:
+                try:
+                    pct = float(linha.split("%")[0].split()[-1])
 
-        if "%" in linha:
-            try:
-                pct = float(linha.split("%")[0].split()[-1])
-
-                with lock:
-                    progresso[pasta]["pct"] = pct
-                    progresso[pasta]["status"] = f"Copiando {arquivo}"
-
-            except:
-                pass
+                    with lock:
+                        progresso[pasta]["pct"] = pct
+                        progresso[pasta]["status"] = f"Copiando {arquivo}"
+                    emit(f"[{pasta}] Copiando {arquivo} ({pct:.1f}%)")
+                except Exception:
+                    pass
 
     processo.wait()
     return processo.returncode
 
 
 def copiar_pasta_completa(origem, destino, pasta):
-    comando = [
-        "robocopy",
-        origem,
-        destino,
-        "/E",
-        "/R:3",
-        "/W:5",
-        "/Z",
-        "/ETA"
-    ]
+    comando = build_robocopy_command(origem, destino, move_files=True, recursive=True)
 
     processo = subprocess.Popen(
         comando,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True
+        text=True,
+        bufsize=1
     )
 
-    for linha in processo.stdout:
-        with lock:
-            progresso[pasta]["status"] = f"Copiando {pasta}"
+    if processo.stdout:
+        for linha in processo.stdout:
+            with lock:
+                progresso[pasta]["status"] = f"Copiando {pasta}"
+                progresso[pasta]["pct"] = 50
+            emit(f"[{pasta}] Copiando {pasta}")
 
     processo.wait()
     return processo.returncode
+
+
+def remover_arquivos_copiados(origem, destino):
+    if not os.path.exists(origem):
+        return
+
+    for raiz, _, arquivos in os.walk(origem, topdown=False):
+        for arquivo in arquivos:
+            origem_arq = os.path.join(raiz, arquivo)
+            rel_path = os.path.relpath(origem_arq, origem)
+            destino_arq = os.path.join(destino, rel_path)
+
+            if os.path.exists(destino_arq):
+                try:
+                    os.remove(origem_arq)
+                    log(f"Origem limpa após cópia: {origem_arq}")
+                except Exception as exc:
+                    log(f"Não foi possível remover {origem_arq}: {exc}")
+
+    for raiz, dirs, _ in os.walk(origem, topdown=False):
+        for nome_dir in dirs:
+            caminho_dir = os.path.join(raiz, nome_dir)
+            try:
+                if os.path.isdir(caminho_dir) and not os.listdir(caminho_dir):
+                    os.rmdir(caminho_dir)
+            except Exception:
+                pass
 
 
 # ===== PROCESSAMENTO =====
@@ -361,51 +402,60 @@ def processar_pasta(pasta):
         with lock:
             progresso[pasta]["pct"] = 0
             progresso[pasta]["status"] = f"Iniciando {pasta}"
+        emit(f"[{pasta}] Iniciando {pasta}")
 
         codigo = copiar_pasta_completa(origem, destino, pasta)
 
         if codigo <= 3:
+            remover_arquivos_copiados(origem, destino)
             with lock:
                 progresso[pasta]["status"] = "OK"
                 progresso[pasta]["pct"] = 100
+            emit(f"[{pasta}] OK")
         else:
             with lock:
                 progresso[pasta]["status"] = "Erro cópia"
+            emit(f"[{pasta}] Erro cópia")
 
         return
 
     try:
-        arquivos = os.listdir(origem)
-    except:
+        arquivos = listar_arquivos_para_copiar(origem)
+    except Exception:
         with lock:
             progresso[pasta]["status"] = "Erro acesso"
         return
 
-    for arquivo in arquivos:
+    if not arquivos:
+        with lock:
+            progresso[pasta]["status"] = "OK"
+            progresso[pasta]["pct"] = 100
+        return
 
-        if not arquivo.lower().endswith(".bak"):
-            continue
-
-        origem_arq = os.path.join(origem, arquivo)
-        destino_arq = os.path.join(destino, arquivo)
+    for caminho_arq in arquivos:
+        rel_path = os.path.relpath(caminho_arq, origem)
+        destino_arq = os.path.join(destino, rel_path)
 
         if os.path.exists(destino_arq):
             try:
-                os.remove(origem_arq)
-            except:
+                os.remove(caminho_arq)
+            except Exception:
                 pass
             continue
 
+        os.makedirs(os.path.dirname(destino_arq), exist_ok=True)
+
         with lock:
             progresso[pasta]["pct"] = 0
-            progresso[pasta]["status"] = f"Iniciando {arquivo}"
+            progresso[pasta]["status"] = f"Iniciando {rel_path}"
+        emit(f"[{pasta}] Iniciando {rel_path}")
 
-        codigo = copiar_arquivo(origem, destino, arquivo, pasta)
+        codigo = copiar_arquivo(origem, destino, rel_path, pasta)
 
         if codigo <= 3:
             try:
-                os.remove(origem_arq)
-            except:
+                os.remove(caminho_arq)
+            except Exception:
                 pass
 
             with lock:
@@ -418,9 +468,10 @@ def processar_pasta(pasta):
 
 # ===== LOOP =====
 
-def executar():
+def executar(loop=False, sleep_seconds=None):
 
-    threading.Thread(target=desenhar_painel, daemon=True).start()
+    if loop:
+        threading.Thread(target=desenhar_painel, daemon=True).start()
 
     while True:
 
@@ -440,11 +491,20 @@ def executar():
                 progresso[p]["status"] = "Aguardando"
                 progresso[p]["pct"] = 0
 
+        emit(f"Status geral do backup: {status_geral}")
         enviar_email_resumo(status_geral)
-        time.sleep(tempo_espera)
+
+        if not loop:
+            return status_geral
+
+        time.sleep(sleep_seconds or tempo_espera)
 
 
 # ===== START =====
 
 if __name__ == "__main__":
-    executar()
+    parser = argparse.ArgumentParser(description="Backup Manager")
+    parser.add_argument("--loop", action="store_true", help="Executa continuamente")
+    parser.add_argument("--wait-seconds", type=int, default=60, help="Intervalo entre execuções em modo loop")
+    args = parser.parse_args()
+    executar(loop=args.loop, sleep_seconds=args.wait_seconds)
