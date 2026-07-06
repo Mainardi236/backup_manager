@@ -5,12 +5,17 @@ import sys
 import json
 import smtplib
 import threading
+import ctypes
 from email.message import EmailMessage
 from tkinter import filedialog, messagebox
 from PIL import Image
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(BASE_DIR, "backup_settings.json")
+APP_ICON_FILE = os.path.join(BASE_DIR, "fang_icone.ico")
+NERD_FONT_FILE = os.path.join(BASE_DIR, "AgaveNerdFontMono-Bold.ttf")
+NERD_FONT_FAMILY = "Agave Nerd Font Mono"
+NERD_FONT_TITLE = (NERD_FONT_FAMILY, 16, "bold")
 
 DEFAULT_SETTINGS = {
     "backup_source_path": "",
@@ -83,6 +88,27 @@ settings = load_settings()
 ctk.set_appearance_mode("dark")
 
 
+def load_private_font(font_path):
+    if not sys.platform.startswith("win") or not os.path.exists(font_path):
+        return False
+
+    FR_PRIVATE = 0x10
+    return bool(ctypes.windll.gdi32.AddFontResourceExW(font_path, FR_PRIVATE, 0))
+
+
+def set_window_icon(window):
+    if not os.path.exists(APP_ICON_FILE):
+        return
+
+    try:
+        window.iconbitmap(APP_ICON_FILE)
+    except Exception:
+        pass
+
+
+load_private_font(NERD_FONT_FILE)
+
+
 def import_settings_from_file():
     global settings
     path = filedialog.askopenfilename(title="Importar configurações", filetypes=[("Arquivos JSON", "*.json")], defaultextension=".json")
@@ -119,11 +145,11 @@ def prompt_initial_setup():
         import_settings_from_file()
 
 app = ctk.CTk()
-app.title("Controle de Backup")
+app.title("Backup Manager v1.0.0")
 app.geometry("520x480")
 app.minsize(520, 480)
 app.resizable(True, True)
-app.iconbitmap(r"C:\backup_manager\leao_preto.ico")
+set_window_icon(app)
 
 # ===== FUNDO PRETO =====
 
@@ -162,9 +188,12 @@ header_frame.grid_columnconfigure(0, weight=0)
 header_frame.grid_columnconfigure(1, weight=1)
 header_frame.grid_rowconfigure(0, weight=1)
 
+logo_source = Image.open(os.path.join(BASE_DIR, "fang.png"))
+logo_height = 80
+logo_width = round(logo_source.width * logo_height / logo_source.height)
 logo_img = ctk.CTkImage(
-    light_image=Image.open(r"C:\backup_manager\logo1.png"),
-    size=(80,80)
+    light_image=logo_source,
+    size=(logo_width, logo_height)
 )
 
 logo = ctk.CTkLabel(header_frame, image=logo_img, text="")
@@ -172,9 +201,9 @@ logo.grid(row=0, column=0, sticky="w", padx=(0, 10))
 
 titulo = ctk.CTkLabel(
     header_frame,
-    text="CONTROLE DE BACKUP",
-    text_color=PALETTE_ACCENT,
-    font=("Arial",24,"bold")
+    text="BACKUP MANAGER",
+    text_color="#e6e9ff",
+    font=NERD_FONT_TITLE
 )
 
 titulo.grid(row=0, column=1, sticky="w")
@@ -362,7 +391,7 @@ def rodar(arquivo):
                 output_window.geometry("700x420")
                 output_window.minsize(700, 420)
                 output_window.configure(fg_color=PALETTE_PANEL)
-                output_window.iconbitmap(r"C:\backup_manager\leao_preto.ico")
+                set_window_icon(output_window)
                 output_window.grid_columnconfigure(0, weight=1)
                 output_window.grid_rowconfigure(0, weight=1)
 
@@ -531,7 +560,7 @@ def abrir_settings():
     settings_window.title("Configurações")
     settings_window.geometry("500x600")
     settings_window.minsize(500, 600)
-    settings_window.iconbitmap(r"C:\backup_manager\leao_preto.ico")
+    set_window_icon(settings_window)
     
     settings_frame = ctk.CTkScrollableFrame(settings_window, fg_color=PALETTE_PANEL)
     settings_frame.pack(fill="both", expand=True, padx=10, pady=10)
