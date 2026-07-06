@@ -1,8 +1,10 @@
 import customtkinter as ctk
 import subprocess
 import os
+import sys
 import json
 import smtplib
+import threading
 from email.message import EmailMessage
 from tkinter import messagebox
 from PIL import Image
@@ -20,7 +22,7 @@ DEFAULT_SETTINGS = {
     "compression": "off",
     "log_enabled": True,
     "log_retention": "30",
-    "dark_mode": "Escuro",
+    "show_output_window": True,
     "email_enabled": False,
     "sender_email": "",
     "recipient_email": "",
@@ -120,31 +122,98 @@ button_group.grid_columnconfigure(0, weight=1)
 def rodar(arquivo):
 
     try:
+        kwargs = {}
+        if os.name == "nt":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            kwargs["startupinfo"] = startupinfo
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
         if arquivo.endswith(".ps1"):
-
             subprocess.Popen([
                 "powershell",
                 "-ExecutionPolicy",
                 "Bypass",
+                "-WindowStyle",
+                "Hidden",
                 "-File",
                 arquivo
-            ])
+            ], **kwargs)
 
         elif arquivo.endswith(".py"):
+            show_output = load_settings().get("show_output_window", True)
+            if show_output:
+                if hasattr(app, "active_backup_process") and getattr(app, "active_backup_process", None) is not None:
+                    proc = getattr(app, "active_backup_process")
+                    if proc.poll() is None:
+                        proc.terminate()
+
+                if hasattr(app, "output_window") and getattr(app, "output_window", None) is not None and app.output_window.winfo_exists():
+                    app.output_window.destroy()
+
+                output_window = ctk.CTkToplevel(app)
+                app.output_window = output_window
+                output_window.title("Saída do Backup")
+                output_window.geometry("700x420")
+                output_window.minsize(700, 420)
+                output_window.configure(fg_color=PALETTE_PANEL)
+                output_window.iconbitmap(r"C:\backup_manager\leao_preto.ico")
+                output_window.grid_columnconfigure(0, weight=1)
+                output_window.grid_rowconfigure(0, weight=1)
+
+                header = ctk.CTkLabel(output_window, text="Saída do Backup", font=("Arial", 16, "bold"), text_color=PALETTE_TEXT)
+                header.pack(padx=20, pady=(15, 10), anchor="w")
+
+                output_text = ctk.CTkTextbox(output_window, fg_color="#2b2b2b", text_color="white", wrap="word", height=260)
+                output_text.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+                output_text.insert("end", "Iniciando backup...\n")
+                output_text.configure(state="disabled")
+
+                footer = ctk.CTkFrame(output_window, fg_color="transparent")
+                footer.pack(fill="x", padx=20, pady=(0, 15))
+
+                def close_window():
+                    if getattr(app, "active_backup_process", None) is not None and app.active_backup_process.poll() is None:
+                        app.active_backup_process.terminate()
+                    if getattr(app, "output_window", None) is not None and app.output_window.winfo_exists():
+                        app.output_window.destroy()
+                    app.output_window = None
+
+                close_button = ctk.CTkButton(footer, text="Fechar", command=close_window, fg_color=PALETTE_SECONDARY, hover_color=PALETTE_SECONDARY_HOVER)
+                close_button.pack(anchor="e")
+
+                process = subprocess.Popen([
+                    sys.executable,
+                    arquivo
+                ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, **kwargs)
+                app.active_backup_process = process
+
+                def stream_output():
+                    if process.stdout is None:
+                        return
+                    for line in process.stdout:
+                        output_text.after(0, lambda l=line: output_text.configure(state="normal") or output_text.insert("end", l) or output_text.configure(state="disabled"))
+                    if process.poll() is None:
+                        process.wait()
+                    output_text.after(0, lambda: output_text.configure(state="normal") or output_text.insert("end", "\nBackup finalizado.\n") or output_text.configure(state="disabled"))
+
+                threading.Thread(target=stream_output, daemon=True).start()
+                return
 
             subprocess.Popen([
-                "python",
+                sys.executable,
                 arquivo
-            ])
+            ], **kwargs)
 
         else:
-
             os.startfile(arquivo)
 
-    except Exception as e:
+        messagebox.showinfo("Backup", "O backup foi iniciado em segundo plano.")
 
+    except Exception as e:
         print(e)
+        messagebox.showerror("Erro", f"Não foi possível iniciar o backup: {e}")
 
 
 # ===== BOTÕES =====
@@ -376,23 +445,24 @@ def abrir_settings():
     entry_log_retention.insert(0, settings.get("log_retention", "30"))
     entry_log_retention.pack(fill="x", expand=True, padx=20, pady=(0, 15))
     
-    # ===== MODO ESCURO =====
-    label_dark_mode = ctk.CTkLabel(
+    # ===== EXIBIR SAÍDA EM JANELA =====
+    label_output_window = ctk.CTkLabel(
         settings_frame,
-        text="Aparência:",
+        text="Exibir saída do backup em janela:",
         text_color="white",
         font=("Arial", 12, "bold")
     )
-    label_dark_mode.pack(anchor="w", padx=20, pady=(10, 5))
-    
-    dark_mode_var = ctk.StringVar(value=settings.get("dark_mode", "Escuro"))
-    dark_mode_menu = ctk.CTkComboBox(
+    label_output_window.pack(anchor="w", padx=20, pady=(10, 5))
+
+    show_output_window_var = ctk.StringVar(value="on" if settings.get("show_output_window", True) else "off")
+    switch_show_output_window = ctk.CTkSwitch(
         settings_frame,
-        values=["Claro", "Escuro"],
-        variable=dark_mode_var,
-        state="readonly"
+        text="Mostrar janela com o output da cópia",
+        variable=show_output_window_var,
+        onvalue="on",
+        offvalue="off"
     )
-    dark_mode_menu.pack(fill="x", expand=True, padx=20, pady=(0, 15))
+    switch_show_output_window.pack(anchor="w", padx=20, pady=(0, 15))
 
     # ===== EMAIL NOTIFICAÇÕES =====
     label_email_notifications = ctk.CTkLabel(
@@ -743,7 +813,7 @@ def abrir_settings():
         settings["compression"] = compression_var.get()
         settings["log_enabled"] = log_enabled
         settings["log_retention"] = entry_log_retention.get() or settings["log_retention"]
-        settings["dark_mode"] = dark_mode_var.get()
+        settings["show_output_window"] = show_output_window_var.get() == "on"
         settings["email_enabled"] = email_enabled
         settings["sender_email"] = entry_sender_email.get().strip()
         settings["recipient_email"] = entry_recipient_email.get().strip()
