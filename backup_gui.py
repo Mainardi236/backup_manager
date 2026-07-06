@@ -6,28 +6,30 @@ import json
 import smtplib
 import threading
 from email.message import EmailMessage
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 from PIL import Image
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(BASE_DIR, "backup_settings.json")
 
 DEFAULT_SETTINGS = {
-    "backup_source_path": "C:\\Backups\\",
-    "backup_destination_path": "\\\\192.168.0.150\\d$\\Backup Totvs",
-    "backup_folders": ["master", "msdb", "model", "sigaoficialtss", "sigaoficial"],
-    "copy_everything": False,
+    "backup_source_path": "",
+    "backup_destination_path": "",
+    "backup_folders": [],
+    "copy_everything": True,
     "frequency": "Diário",
-    "notifications": "on",
+    "notifications": "off",
     "compression": "off",
-    "log_enabled": True,
-    "log_retention": "30",
-    "show_output_window": True,
+    "log_enabled": False,
+    "log_retention": "",
+    "show_output_window": False,
+    "auto_backup_times": "",
+    "loop_backup_times": "",
     "email_enabled": False,
     "sender_email": "",
     "recipient_email": "",
-    "email_mode": "always",
-    "smtp_host": "localhost",
+    "email_mode": "failed",
+    "smtp_host": "",
     "smtp_port": 25,
     "smtp_username": "",
     "smtp_password": "",
@@ -53,10 +55,19 @@ def load_settings():
     except Exception:
         settings = DEFAULT_SETTINGS.copy()
 
+    if not isinstance(settings, dict):
+        settings = DEFAULT_SETTINGS.copy()
+
     for key, value in DEFAULT_SETTINGS.items():
         settings.setdefault(key, value)
 
     return settings
+
+
+def is_default_settings(settings_data):
+    if not isinstance(settings_data, dict):
+        return True
+    return settings_data == DEFAULT_SETTINGS
 
 
 def save_settings_file(settings):
@@ -71,6 +82,42 @@ settings = load_settings()
 
 ctk.set_appearance_mode("dark")
 
+
+def import_settings_from_file():
+    global settings
+    path = filedialog.askopenfilename(title="Importar configurações", filetypes=[("Arquivos JSON", "*.json")], defaultextension=".json")
+    if not path:
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            imported = json.load(f)
+        if not isinstance(imported, dict):
+            raise ValueError("Arquivo inválido")
+        merged = DEFAULT_SETTINGS.copy()
+        merged.update(imported)
+        settings = merged
+        save_settings_file(settings)
+        render_preview()
+        return True
+    except Exception as e:
+        messagebox.showerror("Importar configurações", f"Não foi possível importar as configurações:\n{e}")
+        return False
+
+
+def prompt_initial_setup():
+    if not is_default_settings(settings):
+        return
+
+    choice = messagebox.askyesnocancel(
+        "Configurações",
+        "Nenhuma configuração foi encontrada. Deseja configurar agora?\n\nClique em Sim para abrir as configurações.\nClique em Não para importar um arquivo JSON.\nClique em Cancelar para continuar sem configurar."
+    )
+
+    if choice is True:
+        abrir_settings()
+    elif choice is False:
+        import_settings_from_file()
+
 app = ctk.CTk()
 app.title("Controle de Backup")
 app.geometry("520x480")
@@ -82,11 +129,38 @@ app.iconbitmap(r"C:\backup_manager\leao_preto.ico")
 
 frame = ctk.CTkFrame(app, fg_color=PALETTE_BG)
 frame.pack(fill="both", expand=True)
+frame.grid_columnconfigure(0, weight=1)
+frame.grid_rowconfigure(1, weight=1)
+frame.grid_rowconfigure(2, weight=0)
+
+status_var = ctk.StringVar(value="Status: pronto")
+status_frame = ctk.CTkFrame(frame, fg_color="#171a1d")
+status_frame.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 10))
+status_frame.grid_columnconfigure(0, weight=1)
+
+status_progress = ctk.CTkProgressBar(status_frame, width=220, height=6)
+status_progress.set(0)
+status_progress.grid(row=0, column=0, sticky="ew", padx=16, pady=(10, 6))
+
+status_label = ctk.CTkLabel(status_frame, textvariable=status_var, text_color=PALETTE_MUTED, font=("Arial", 11))
+status_label.grid(row=1, column=0, sticky="w", padx=16, pady=(0, 10))
+
+
+def set_status(message, running=False):
+    status_var.set(f"Status: {message}")
+    if running:
+        status_progress.start()
+    else:
+        status_progress.stop()
+        status_progress.set(0)
 
 # ===== CABEÇALHO =====
 
-header_frame = ctk.CTkFrame(frame, fg_color="transparent")
-header_frame.pack(fill="x", padx=20, pady=(20, 10))
+header_frame = ctk.CTkFrame(frame, fg_color="#171a1d")
+header_frame.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 10))
+header_frame.grid_columnconfigure(0, weight=0)
+header_frame.grid_columnconfigure(1, weight=1)
+header_frame.grid_rowconfigure(0, weight=1)
 
 logo_img = ctk.CTkImage(
     light_image=Image.open(r"C:\backup_manager\logo1.png"),
@@ -106,22 +180,151 @@ titulo = ctk.CTkLabel(
 titulo.grid(row=0, column=1, sticky="w")
 header_frame.grid_columnconfigure(1, weight=1)
 
+# ===== CONTEÚDO PRINCIPAL =====
+
+content_frame = ctk.CTkFrame(frame, fg_color="transparent")
+content_frame.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 16))
+content_frame.grid_columnconfigure(0, weight=1)
+content_frame.grid_columnconfigure(1, weight=0)
+content_frame.grid_rowconfigure(0, weight=1)
+
 # ===== BOTÕES =====
 
-button_container = ctk.CTkFrame(frame, fg_color="transparent")
-button_container.pack(fill="x", padx=20, pady=(0, 20))
+button_container = ctk.CTkFrame(content_frame, fg_color="#171a1d")
+button_container.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 button_container.grid_columnconfigure(0, weight=1)
+button_container.grid_rowconfigure(0, weight=0)
+button_container.grid_rowconfigure(1, weight=0)
+button_container.grid_rowconfigure(2, weight=0)
+button_container.grid_rowconfigure(3, weight=0)
+button_container.grid_rowconfigure(4, weight=0)
+button_container.grid_rowconfigure(5, weight=1)
 
-button_group = ctk.CTkFrame(button_container, fg_color="transparent", width=420)
-button_group.pack(fill="x", anchor="n", padx=20, pady=0)
-button_group.pack_propagate(False)
+button_group = ctk.CTkFrame(button_container, fg_color="transparent", width=320)
+button_group.grid(row=0, column=0, sticky="n", padx=16, pady=16)
+button_group.grid_propagate(False)
 button_group.grid_columnconfigure(0, weight=1)
+
+# ===== PREVIEW LATERAL =====
+
+preview_container = ctk.CTkFrame(content_frame, fg_color="#171a1d")
+preview_container.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+preview_container.grid_columnconfigure(0, weight=1)
+preview_container.grid_rowconfigure(0, weight=0)
+preview_container.grid_rowconfigure(1, weight=1)
+preview_container.grid_rowconfigure(2, weight=1)
+
+preview_title = ctk.CTkLabel(preview_container, text="Preview", text_color=PALETTE_TEXT, font=("Arial", 14, "bold"))
+preview_title.grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
+
+source_panel = ctk.CTkFrame(preview_container, fg_color="#21262c")
+source_panel.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+source_panel.grid_columnconfigure(0, weight=1)
+source_panel.grid_rowconfigure(0, weight=0)
+source_panel.grid_rowconfigure(1, weight=0)
+source_panel.grid_rowconfigure(2, weight=1)
+source_panel.configure(width=260, height=185)
+
+source_label = ctk.CTkLabel(source_panel, text="Origem", text_color=PALETTE_ACCENT, font=("Arial", 12, "bold"))
+source_label.grid(row=0, column=0, sticky="w", padx=10, pady=(8, 2))
+
+source_path_var = ctk.StringVar(value=settings.get("backup_source_path", ""))
+source_path_label = ctk.CTkLabel(source_panel, textvariable=source_path_var, text_color=PALETTE_TEXT, wraplength=200, justify="left")
+source_path_label.grid(row=1, column=0, sticky="w", padx=10, pady=(0, 8))
+
+source_scroll = ctk.CTkScrollableFrame(source_panel, fg_color="#2b3138")
+source_scroll.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
+source_scroll.grid_columnconfigure(0, weight=1)
+
+source_items = []
+
+
+destination_panel = ctk.CTkFrame(preview_container, fg_color="#21262c")
+destination_panel.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+destination_panel.grid_columnconfigure(0, weight=1)
+destination_panel.grid_rowconfigure(0, weight=0)
+destination_panel.grid_rowconfigure(1, weight=0)
+destination_panel.grid_rowconfigure(2, weight=1)
+destination_panel.configure(width=260, height=185)
+
+destination_label = ctk.CTkLabel(destination_panel, text="Destino", text_color=PALETTE_ACCENT, font=("Arial", 12, "bold"))
+destination_label.grid(row=0, column=0, sticky="w", padx=10, pady=(8, 2))
+
+destination_path_var = ctk.StringVar(value=settings.get("backup_destination_path", ""))
+destination_path_label = ctk.CTkLabel(destination_panel, textvariable=destination_path_var, text_color=PALETTE_TEXT, wraplength=200, justify="left")
+destination_path_label.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
+
+destination_scroll = ctk.CTkScrollableFrame(destination_panel, fg_color="#2b3138")
+destination_scroll.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
+destination_scroll.grid_columnconfigure(0, weight=1)
+
+destination_items = []
+
+
+def render_preview():
+    for widget in source_scroll.winfo_children():
+        widget.destroy()
+    for widget in destination_scroll.winfo_children():
+        widget.destroy()
+
+    source_items.clear()
+    destination_items.clear()
+    source_path = settings.get("backup_source_path", "")
+    destination_path = settings.get("backup_destination_path", "")
+    source_path_var.set(source_path)
+    destination_path_var.set(destination_path)
+
+    def add_item(container, label_text, is_dir=True):
+        row = ctk.CTkFrame(container, fg_color="transparent")
+        row.pack(fill="x", padx=6, pady=2)
+        icon = "📁" if is_dir else "📄"
+        ctk.CTkLabel(row, text=f"{icon} {label_text}", text_color=PALETTE_TEXT, anchor="w", justify="left", wraplength=180).pack(anchor="w")
+
+    try:
+        if os.path.exists(source_path):
+            entries = sorted(os.listdir(source_path))[:10]
+            for entry in entries:
+                full_path = os.path.join(source_path, entry)
+                add_item(source_scroll, entry, os.path.isdir(full_path))
+        else:
+            add_item(source_scroll, "Pasta de origem não encontrada", True)
+    except Exception:
+        add_item(source_scroll, "Não foi possível listar a origem", True)
+
+    try:
+        if os.path.exists(destination_path):
+            entries = sorted(os.listdir(destination_path))[:10]
+            for entry in entries:
+                full_path = os.path.join(destination_path, entry)
+                add_item(destination_scroll, entry, os.path.isdir(full_path))
+        else:
+            add_item(destination_scroll, "Pasta de destino não encontrada", True)
+    except Exception:
+        add_item(destination_scroll, "Não foi possível listar o destino", True)
+
+
+def refresh_preview_loop():
+    if app.winfo_exists():
+        render_preview()
+        app.after(3000, refresh_preview_loop)
+
+
+render_preview()
+refresh_preview_loop()
 
 # ===== FUNÇÃO EXECUTAR =====
 
 def rodar(arquivo):
 
     try:
+        target_name = os.path.basename(arquivo).lower()
+        if target_name == "backup_auto.py":
+            set_status("backup auto ativo", running=True)
+        elif target_name == "backup_loop.ps1":
+            set_status("backup loop ativo", running=True)
+        else:
+            set_status("iniciando backup...", running=True)
+
         kwargs = {}
         if os.name == "nt":
             startupinfo = subprocess.STARTUPINFO()
@@ -131,7 +334,7 @@ def rodar(arquivo):
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
         if arquivo.endswith(".ps1"):
-            subprocess.Popen([
+            process = subprocess.Popen([
                 "powershell",
                 "-ExecutionPolicy",
                 "Bypass",
@@ -140,20 +343,21 @@ def rodar(arquivo):
                 "-File",
                 arquivo
             ], **kwargs)
+            setattr(app, "active_backup_process", process)
 
         elif arquivo.endswith(".py"):
             show_output = load_settings().get("show_output_window", True)
             if show_output:
-                if hasattr(app, "active_backup_process") and getattr(app, "active_backup_process", None) is not None:
-                    proc = getattr(app, "active_backup_process")
-                    if proc.poll() is None:
-                        proc.terminate()
+                active_backup_process = getattr(app, "active_backup_process", None)
+                if active_backup_process is not None and active_backup_process.poll() is None:
+                    active_backup_process.terminate()
 
-                if hasattr(app, "output_window") and getattr(app, "output_window", None) is not None and app.output_window.winfo_exists():
-                    app.output_window.destroy()
+                output_window_existing = getattr(app, "output_window", None)
+                if output_window_existing is not None and output_window_existing.winfo_exists():
+                    output_window_existing.destroy()
 
                 output_window = ctk.CTkToplevel(app)
-                app.output_window = output_window
+                setattr(app, "output_window", output_window)
                 output_window.title("Saída do Backup")
                 output_window.geometry("700x420")
                 output_window.minsize(700, 420)
@@ -174,11 +378,14 @@ def rodar(arquivo):
                 footer.pack(fill="x", padx=20, pady=(0, 15))
 
                 def close_window():
-                    if getattr(app, "active_backup_process", None) is not None and app.active_backup_process.poll() is None:
-                        app.active_backup_process.terminate()
-                    if getattr(app, "output_window", None) is not None and app.output_window.winfo_exists():
-                        app.output_window.destroy()
-                    app.output_window = None
+                    active_backup_process = getattr(app, "active_backup_process", None)
+                    if active_backup_process is not None and active_backup_process.poll() is None:
+                        active_backup_process.terminate()
+                    output_window_existing = getattr(app, "output_window", None)
+                    if output_window_existing is not None and output_window_existing.winfo_exists():
+                        output_window_existing.destroy()
+                    setattr(app, "output_window", None)
+                    set_status("pronto", running=False)
 
                 close_button = ctk.CTkButton(footer, text="Fechar", command=close_window, fg_color=PALETTE_SECONDARY, hover_color=PALETTE_SECONDARY_HOVER)
                 close_button.pack(anchor="e")
@@ -187,7 +394,7 @@ def rodar(arquivo):
                     sys.executable,
                     arquivo
                 ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, **kwargs)
-                app.active_backup_process = process
+                setattr(app, "active_backup_process", process)
 
                 def stream_output():
                     if process.stdout is None:
@@ -197,14 +404,17 @@ def rodar(arquivo):
                     if process.poll() is None:
                         process.wait()
                     output_text.after(0, lambda: output_text.configure(state="normal") or output_text.insert("end", "\nBackup finalizado.\n") or output_text.configure(state="disabled"))
+                    set_status("pronto", running=False)
 
                 threading.Thread(target=stream_output, daemon=True).start()
                 return
 
-            subprocess.Popen([
+            process = subprocess.Popen([
                 sys.executable,
                 arquivo
             ], **kwargs)
+            setattr(app, "active_backup_process", process)
+            set_status("pronto", running=False)
 
         else:
             os.startfile(arquivo)
@@ -222,39 +432,42 @@ botao1 = ctk.CTkButton(
     button_group,
     text="Executar Backup Manual",
     command=lambda: rodar(r"C:\backup_manager\backup_manager_total.py"),
-    width=420,
+    width=800,
+    height=35,
     fg_color=PALETTE_ACCENT,
     hover_color=PALETTE_ACCENT_HOVER,
     text_color=PALETTE_TEXT
 )
 
-botao1.pack(fill="x", pady=8)
+botao1.grid(row=0, column=0, pady=(0, 8), padx=20)
 
 
 botao2 = ctk.CTkButton(
     button_group,
     text="Executar Backup Auto",
     command=lambda: rodar(r"C:\backup_manager\backup_auto.py"),
-    width=420,
+    width=800,
+    height=35,
     fg_color=PALETTE_ACCENT,
     hover_color=PALETTE_ACCENT_HOVER,
     text_color=PALETTE_TEXT
 )
 
-botao2.pack(fill="x", pady=8)
+botao2.grid(row=1, column=0, pady=(0, 8), padx=20)
 
 
 botao3 = ctk.CTkButton(
     button_group,
     text="Executar Backup Loop",
     command=lambda: rodar(r"C:\backup_manager\backup_loop.ps1"),
-    width=420,
+    width=800,
+    height=35,
     fg_color=PALETTE_ACCENT,
     hover_color=PALETTE_ACCENT_HOVER,
     text_color=PALETTE_TEXT
 )
 
-botao3.pack(fill="x", pady=8)
+botao3.grid(row=2, column=0, pady=(0, 8), padx=20)
 
 log_enabled = settings.get("log_enabled", True)
 email_enabled = settings.get("email_enabled", False)
@@ -271,14 +484,36 @@ botao4 = ctk.CTkButton(
     button_group,
     text="Ver Log",
     command=lambda: rodar(r"C:\backup_manager\backup_log.txt") if log_enabled else None,
-    width=420,
+    width=800,
+    height=35,
     fg_color=PALETTE_SECONDARY,
     hover_color=PALETTE_SECONDARY_HOVER,
     text_color=PALETTE_TEXT
 )
 
-botao4.pack(fill="x", pady=8)
+botao4.grid(row=3, column=0, pady=(0, 8), padx=20)
 update_log_button()
+
+
+# ===== BOTÕES INFERIORES =====
+
+def cancelar_backup_em_execucao():
+    active_backup_process = getattr(app, "active_backup_process", None)
+    if active_backup_process is not None and active_backup_process.poll() is None:
+        active_backup_process.terminate()
+        set_status("backup cancelado", running=False)
+        messagebox.showinfo("Backup", "Backup cancelado com sucesso.")
+    else:
+        messagebox.showwarning("Backup", "Nenhum backup está em execução no momento.")
+
+
+def reiniciar_programa():
+    app.destroy()
+    os.startfile(os.path.abspath(__file__))
+
+
+def fechar_programa():
+    app.destroy()
 
 
 # ===== SETTINGS WINDOW =====
@@ -286,12 +521,13 @@ update_log_button()
 def abrir_settings():
     """Abre a janela de configurações"""
     
-    if hasattr(app, "settings_window") and app.settings_window.winfo_exists():
-        app.settings_window.focus()
+    existing_settings_window = getattr(app, "settings_window", None)
+    if existing_settings_window is not None and existing_settings_window.winfo_exists():
+        existing_settings_window.focus()
         return
     
     settings_window = ctk.CTkToplevel(app)
-    app.settings_window = settings_window
+    setattr(app, "settings_window", settings_window)
     settings_window.title("Configurações")
     settings_window.geometry("500x600")
     settings_window.minsize(500, 600)
@@ -318,10 +554,32 @@ def abrir_settings():
         font=("Arial", 12, "bold")
     )
     label_backup_path.pack(anchor="w", padx=20, pady=(10, 5))
-    
-    entry_backup_path = ctk.CTkEntry(settings_frame)
-    entry_backup_path.insert(0, settings.get("backup_source_path", settings.get("backup_path", "C:\\Backups\\")))
-    entry_backup_path.pack(fill="x", expand=True, padx=20, pady=(0, 15))
+
+    backup_path_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
+    backup_path_frame.pack(fill="x", padx=20, pady=(0, 15))
+    backup_path_frame.grid_columnconfigure(0, weight=1)
+
+    entry_backup_path = ctk.CTkEntry(backup_path_frame, placeholder_text="Selecione a pasta de origem")
+    entry_backup_path.insert(0, settings.get("backup_source_path", settings.get("backup_path", "")))
+    entry_backup_path.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+
+    def browse_source_folder():
+        folder = filedialog.askdirectory(title="Selecionar pasta de origem")
+        if folder:
+            entry_backup_path.delete(0, "end")
+            entry_backup_path.insert(0, folder)
+
+    browse_source_button = ctk.CTkButton(
+        backup_path_frame,
+        text="Procurar",
+        width=90,
+        height=30,
+        fg_color=PALETTE_ACCENT,
+        hover_color=PALETTE_ACCENT_HOVER,
+        text_color=PALETTE_TEXT,
+        command=browse_source_folder
+    )
+    browse_source_button.grid(row=0, column=1)
 
     label_destination_path = ctk.CTkLabel(
         settings_frame,
@@ -331,9 +589,31 @@ def abrir_settings():
     )
     label_destination_path.pack(anchor="w", padx=20, pady=(10, 5))
 
-    entry_destination_path = ctk.CTkEntry(settings_frame)
-    entry_destination_path.insert(0, settings.get("backup_destination_path", "\\\\192.168.0.150\\d$\\Backup Totvs"))
-    entry_destination_path.pack(fill="x", expand=True, padx=20, pady=(0, 15))
+    destination_path_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
+    destination_path_frame.pack(fill="x", padx=20, pady=(0, 15))
+    destination_path_frame.grid_columnconfigure(0, weight=1)
+
+    entry_destination_path = ctk.CTkEntry(destination_path_frame, placeholder_text="Selecione a pasta de destino")
+    entry_destination_path.insert(0, settings.get("backup_destination_path", ""))
+    entry_destination_path.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+
+    def browse_destination_folder():
+        folder = filedialog.askdirectory(title="Selecionar pasta de destino")
+        if folder:
+            entry_destination_path.delete(0, "end")
+            entry_destination_path.insert(0, folder)
+
+    browse_destination_button = ctk.CTkButton(
+        destination_path_frame,
+        text="Procurar",
+        width=90,
+        height=30,
+        fg_color=PALETTE_ACCENT,
+        hover_color=PALETTE_ACCENT_HOVER,
+        text_color=PALETTE_TEXT,
+        command=browse_destination_folder
+    )
+    browse_destination_button.grid(row=0, column=1)
 
     label_folder_list = ctk.CTkLabel(
         settings_frame,
@@ -343,11 +623,11 @@ def abrir_settings():
     )
     label_folder_list.pack(anchor="w", padx=20, pady=(10, 5))
 
-    entry_folder_list = ctk.CTkEntry(settings_frame)
+    entry_folder_list = ctk.CTkEntry(settings_frame, placeholder_text="Ex.: pasta1, pasta2")
     entry_folder_list.insert(0, ",".join(settings.get("backup_folders", [])))
     entry_folder_list.pack(fill="x", expand=True, padx=20, pady=(0, 15))
 
-    copy_everything_var = ctk.StringVar(value="on" if settings.get("copy_everything", False) else "off")
+    copy_everything_var = ctk.StringVar(value="on" if settings.get("copy_everything", True) else "off")
     switch_copy_everything = ctk.CTkSwitch(
         settings_frame,
         text="Copiar todos os arquivos/pastas no caminho",
@@ -412,9 +692,35 @@ def abrir_settings():
         offvalue="off"
     )
     switch_compression.pack(anchor="w", padx=20, pady=(0, 15))
+
+    # ===== HORÁRIOS DO BACKUP AUTO =====
+    label_auto_times = ctk.CTkLabel(
+        settings_frame,
+        text="Horários do Backup Auto (HH:MM, separados por vírgula):",
+        text_color="white",
+        font=("Arial", 12, "bold")
+    )
+    label_auto_times.pack(anchor="w", padx=20, pady=(10, 5))
+
+    entry_auto_times = ctk.CTkEntry(settings_frame, placeholder_text="Ex.: 13:00,21:00")
+    entry_auto_times.insert(0, settings.get("auto_backup_times", ""))
+    entry_auto_times.pack(fill="x", expand=True, padx=20, pady=(0, 15))
+
+    # ===== HORÁRIOS DO LOOP =====
+    label_loop_times = ctk.CTkLabel(
+        settings_frame,
+        text="Horários do Loop (HH:MM, separados por vírgula):",
+        text_color="white",
+        font=("Arial", 12, "bold")
+    )
+    label_loop_times.pack(anchor="w", padx=20, pady=(10, 5))
+
+    entry_loop_times = ctk.CTkEntry(settings_frame, placeholder_text="Ex.: 13:00,21:00")
+    entry_loop_times.insert(0, settings.get("loop_backup_times", ""))
+    entry_loop_times.pack(fill="x", expand=True, padx=20, pady=(0, 15))
     
     # ===== LOG ENABLE =====
-    log_enabled_var = ctk.StringVar(value="on" if settings.get("log_enabled", True) else "off")
+    log_enabled_var = ctk.StringVar(value="on" if settings.get("log_enabled", False) else "off")
     label_log_enabled = ctk.CTkLabel(
         settings_frame,
         text="Registro de Log:",
@@ -441,8 +747,8 @@ def abrir_settings():
     )
     label_log_retention.pack(anchor="w", padx=20, pady=(10, 5))
     
-    entry_log_retention = ctk.CTkEntry(settings_frame)
-    entry_log_retention.insert(0, settings.get("log_retention", "30"))
+    entry_log_retention = ctk.CTkEntry(settings_frame, placeholder_text="Ex.: 7")
+    entry_log_retention.insert(0, settings.get("log_retention", ""))
     entry_log_retention.pack(fill="x", expand=True, padx=20, pady=(0, 15))
     
     # ===== EXIBIR SAÍDA EM JANELA =====
@@ -454,7 +760,7 @@ def abrir_settings():
     )
     label_output_window.pack(anchor="w", padx=20, pady=(10, 5))
 
-    show_output_window_var = ctk.StringVar(value="on" if settings.get("show_output_window", True) else "off")
+    show_output_window_var = ctk.StringVar(value="on" if settings.get("show_output_window", False) else "off")
     switch_show_output_window = ctk.CTkSwitch(
         settings_frame,
         text="Mostrar janela com o output da cópia",
@@ -607,8 +913,8 @@ def abrir_settings():
     )
     label_smtp_host.pack(anchor="w", padx=20, pady=(10, 5))
 
-    entry_smtp_host = ctk.CTkEntry(settings_frame)
-    entry_smtp_host.insert(0, settings.get("smtp_host", "localhost"))
+    entry_smtp_host = ctk.CTkEntry(settings_frame, placeholder_text="smtp.exemplo.com")
+    entry_smtp_host.insert(0, settings.get("smtp_host", ""))
     entry_smtp_host.pack(fill="x", expand=True, padx=20, pady=(0, 15))
 
     label_smtp_port = ctk.CTkLabel(
@@ -795,82 +1101,258 @@ def abrir_settings():
 
     # ===== BOTÕES DE AÇÃO =====
     button_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
-    button_frame.pack(pady=20)
-    
-    def save_settings():
-        nonlocal log_enabled_var
+    button_frame.pack(pady=(20, 10))
 
-        global log_enabled, email_enabled
+    def collect_current_settings():
+        return {
+            "backup_source_path": entry_backup_path.get().strip() or settings.get("backup_source_path", settings.get("backup_path", "C:\\Backups\\")),
+            "backup_destination_path": entry_destination_path.get().strip() or settings.get("backup_destination_path", "\\\\192.168.0.150\\d$\\Backup Totvs"),
+            "backup_folders": [item.strip() for item in entry_folder_list.get().split(",") if item.strip()],
+            "copy_everything": copy_everything_var.get() == "on",
+            "frequency": frequency_var.get(),
+            "notifications": notifications_var.get(),
+            "compression": compression_var.get(),
+            "log_enabled": log_enabled_var.get() == "on",
+            "log_retention": entry_log_retention.get().strip() or settings.get("log_retention", "30"),
+            "show_output_window": show_output_window_var.get() == "on",
+            "auto_backup_times": entry_auto_times.get().strip() or "13:00,21:00",
+            "loop_backup_times": entry_loop_times.get().strip() or "13:00,21:00",
+            "email_enabled": email_enabled_var.get() == "on",
+            "sender_email": entry_sender_email.get().strip(),
+            "recipient_email": entry_recipient_email.get().strip(),
+            "email_mode": "always" if email_mode_var.get() == "Sempre" else "failed",
+            "smtp_provider": provider_var.get(),
+            "smtp_host": entry_smtp_host.get().strip() or "localhost",
+            "smtp_port": int(entry_smtp_port.get().strip() or 25) if entry_smtp_port.get().strip() else 25,
+            "smtp_username": entry_smtp_username.get().strip(),
+            "smtp_password": entry_smtp_password.get(),
+            "smtp_security": {
+                "Nenhum": "none",
+                "STARTTLS": "starttls",
+                "SSL/TLS": "ssl"
+            }.get(smtp_security_var.get(), "none")
+        }
+
+    def apply_settings_to_form(data):
+        entry_backup_path.delete(0, "end")
+        entry_backup_path.insert(0, data.get("backup_source_path", settings.get("backup_source_path", "C:\\Backups\\")))
+        entry_destination_path.delete(0, "end")
+        entry_destination_path.insert(0, data.get("backup_destination_path", "\\\\192.168.0.150\\d$\\Backup Totvs"))
+        entry_folder_list.delete(0, "end")
+        entry_folder_list.insert(0, ",".join(data.get("backup_folders", [])))
+        copy_everything_var.set("on" if data.get("copy_everything", False) else "off")
+        frequency_var.set(data.get("frequency", "Diário"))
+        notifications_var.set(data.get("notifications", "on"))
+        compression_var.set(data.get("compression", "off"))
+        log_enabled_var.set("on" if data.get("log_enabled", True) else "off")
+        entry_log_retention.delete(0, "end")
+        entry_log_retention.insert(0, str(data.get("log_retention", "30")))
+        show_output_window_var.set("on" if data.get("show_output_window", True) else "off")
+        entry_auto_times.delete(0, "end")
+        entry_auto_times.insert(0, data.get("auto_backup_times", "13:00,21:00"))
+        entry_loop_times.delete(0, "end")
+        entry_loop_times.insert(0, data.get("loop_backup_times", "13:00,21:00"))
+        email_enabled_var.set("on" if data.get("email_enabled", False) else "off")
+        entry_sender_email.delete(0, "end")
+        entry_sender_email.insert(0, data.get("sender_email", ""))
+        entry_recipient_email.delete(0, "end")
+        entry_recipient_email.insert(0, data.get("recipient_email", ""))
+        email_mode_var.set("Sempre" if data.get("email_mode", "always") == "always" else "Apenas falhas")
+        provider_var.set(data.get("smtp_provider", detect_smtp_provider()))
+        entry_smtp_host.delete(0, "end")
+        entry_smtp_host.insert(0, data.get("smtp_host", "localhost"))
+        entry_smtp_port.delete(0, "end")
+        entry_smtp_port.insert(0, str(data.get("smtp_port", 25)))
+        entry_smtp_username.delete(0, "end")
+        entry_smtp_username.insert(0, data.get("smtp_username", ""))
+        entry_smtp_password.delete(0, "end")
+        entry_smtp_password.insert(0, data.get("smtp_password", ""))
+        smtp_security_var.set({
+            "ssl": "SSL/TLS",
+            "starttls": "STARTTLS",
+            "none": "Nenhum"
+        }.get(data.get("smtp_security", "none"), "Nenhum"))
+        toggle_email_fields()
+
+    def save_settings():
+        global settings, log_enabled, email_enabled
         log_enabled = log_enabled_var.get() == "on"
         email_enabled = email_enabled_var.get() == "on"
 
-        settings["backup_source_path"] = entry_backup_path.get() or settings.get("backup_source_path", settings.get("backup_path", "C:\\Backups\\"))
-        settings["backup_destination_path"] = entry_destination_path.get() or settings.get("backup_destination_path", "\\\\192.168.0.150\\d$\\Backup Totvs")
-        settings["backup_folders"] = [item.strip() for item in entry_folder_list.get().split(",") if item.strip()]
-        settings["copy_everything"] = copy_everything_var.get() == "on"
-        settings["frequency"] = frequency_var.get()
-        settings["notifications"] = notifications_var.get()
-        settings["compression"] = compression_var.get()
-        settings["log_enabled"] = log_enabled
-        settings["log_retention"] = entry_log_retention.get() or settings["log_retention"]
-        settings["show_output_window"] = show_output_window_var.get() == "on"
-        settings["email_enabled"] = email_enabled
-        settings["sender_email"] = entry_sender_email.get().strip()
-        settings["recipient_email"] = entry_recipient_email.get().strip()
-        settings["email_mode"] = "always" if email_mode_var.get() == "Sempre" else "failed"
-        settings["smtp_provider"] = provider_var.get()
-        settings["smtp_host"] = entry_smtp_host.get().strip() or "localhost"
-        try:
-            settings["smtp_port"] = int(entry_smtp_port.get().strip() or 25)
-        except ValueError:
-            settings["smtp_port"] = 25
-        settings["smtp_username"] = entry_smtp_username.get().strip()
-        settings["smtp_password"] = entry_smtp_password.get()
-        settings["smtp_security"] = {
-            "Nenhum": "none",
-            "STARTTLS": "starttls",
-            "SSL/TLS": "ssl"
-        }.get(smtp_security_var.get(), "none")
-
+        settings.update(collect_current_settings())
         save_settings_file(settings)
         update_log_button()
+        render_preview()
         settings_window.destroy()
 
-    botao_salvar = ctk.CTkButton(
+    def restore_default_settings():
+        global settings, log_enabled, email_enabled
+        if not messagebox.askyesno("Restaurar padrões", "Deseja restaurar todas as configurações para os valores padrão?"):
+            return
+        settings = DEFAULT_SETTINGS.copy()
+        save_settings_file(settings)
+        apply_settings_to_form(settings)
+        log_enabled = settings.get("log_enabled", True)
+        email_enabled = settings.get("email_enabled", False)
+        update_log_button()
+        render_preview()
+        messagebox.showinfo("Configurações", "Configurações padrão aplicadas com sucesso.")
+
+    def import_settings():
+        global settings, log_enabled, email_enabled
+        path = filedialog.askopenfilename(title="Importar configurações", filetypes=[("Arquivos JSON", "*.json")], defaultextension=".json")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                imported = json.load(f)
+            if not isinstance(imported, dict):
+                raise ValueError("Arquivo inválido")
+            merged = DEFAULT_SETTINGS.copy()
+            merged.update(imported)
+            settings = merged
+            save_settings_file(settings)
+            apply_settings_to_form(settings)
+            log_enabled = settings.get("log_enabled", True)
+            email_enabled = settings.get("email_enabled", False)
+            update_log_button()
+            render_preview()
+            messagebox.showinfo("Configurações", "Configurações importadas com sucesso.")
+        except Exception as e:
+            messagebox.showerror("Importar configurações", f"Não foi possível importar as configurações:\n{e}")
+
+    def export_settings():
+        path = filedialog.asksaveasfilename(title="Exportar configurações", initialfile="backup_settings.json", filetypes=[("Arquivos JSON", "*.json")], defaultextension=".json")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(collect_current_settings(), f, indent=4, ensure_ascii=False)
+            messagebox.showinfo("Configurações", "Configurações exportadas com sucesso.")
+        except Exception as e:
+            messagebox.showerror("Exportar configurações", f"Não foi possível exportar as configurações:\n{e}")
+
+    botao_restaurar = ctk.CTkButton(
         button_frame,
+        text="Padrões",
+        width=110,
+        height=36,
+        fg_color=PALETTE_SECONDARY,
+        hover_color=PALETTE_SECONDARY_HOVER,
+        text_color=PALETTE_TEXT,
+        command=restore_default_settings
+    )
+    botao_restaurar.pack(side="left", padx=6)
+
+    botao_importar = ctk.CTkButton(
+        button_frame,
+        text="Importar",
+        width=110,
+        height=36,
+        fg_color=PALETTE_SECONDARY,
+        hover_color=PALETTE_SECONDARY_HOVER,
+        text_color=PALETTE_TEXT,
+        command=import_settings
+    )
+    botao_importar.pack(side="left", padx=6)
+
+    botao_exportar = ctk.CTkButton(
+        button_frame,
+        text="Exportar",
+        width=110,
+        height=36,
+        fg_color=PALETTE_SECONDARY,
+        hover_color=PALETTE_SECONDARY_HOVER,
+        text_color=PALETTE_TEXT,
+        command=export_settings
+    )
+    botao_exportar.pack(side="left", padx=6)
+
+    action_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
+    action_frame.pack(pady=(8, 20))
+
+    botao_salvar = ctk.CTkButton(
+        action_frame,
         text="Salvar",
-        width=120,
+        width=110,
+        height=36,
         fg_color=PALETTE_ACCENT,
         hover_color=PALETTE_ACCENT_HOVER,
         text_color=PALETTE_TEXT,
         command=save_settings
     )
-    botao_salvar.pack(side="left", padx=10)
+    botao_salvar.pack(side="left", padx=8)
     
     botao_cancelar = ctk.CTkButton(
-        button_frame,
+        action_frame,
         text="Cancelar",
-        width=120,
+        width=110,
+        height=36,
         fg_color=PALETTE_SECONDARY,
         hover_color=PALETTE_SECONDARY_HOVER,
         text_color=PALETTE_TEXT,
         command=settings_window.destroy
     )
-    botao_cancelar.pack(side="left", padx=10)
+    botao_cancelar.pack(side="left", padx=8)
 
 
 botao_settings = ctk.CTkButton(
     button_container,
     text="Configurações",
     command=abrir_settings,
+    width=280,
+    height=42,
     fg_color=PALETTE_ACCENT,
     hover_color=PALETTE_ACCENT_HOVER,
     text_color=PALETTE_TEXT
 )
 
-botao_settings.pack(fill="x", pady=8)
+botao_settings.grid(row=4, column=0, pady=(0, 8), padx=20)
+
+footer_buttons_frame = ctk.CTkFrame(button_container, fg_color="transparent")
+footer_buttons_frame.grid(row=5, column=0, sticky="sw", padx=20, pady=(8, 16))
+footer_buttons_frame.grid_columnconfigure(0, weight=0)
+footer_buttons_frame.grid_columnconfigure(1, weight=0)
+footer_buttons_frame.grid_columnconfigure(2, weight=0)
+
+botao_cancelar_backup = ctk.CTkButton(
+    footer_buttons_frame,
+    text="Cancelar Backup",
+    width=120,
+    height=36,
+    fg_color=PALETTE_SECONDARY,
+    hover_color=PALETTE_SECONDARY_HOVER,
+    text_color=PALETTE_TEXT,
+    command=cancelar_backup_em_execucao
+)
+botao_cancelar_backup.pack(side="left", padx=(0, 8))
+
+botao_reiniciar = ctk.CTkButton(
+    footer_buttons_frame,
+    text="Reiniciar",
+    width=110,
+    height=36,
+    fg_color=PALETTE_SECONDARY,
+    hover_color=PALETTE_SECONDARY_HOVER,
+    text_color=PALETTE_TEXT,
+    command=reiniciar_programa
+)
+botao_reiniciar.pack(side="left", padx=(0, 8))
+
+botao_fechar = ctk.CTkButton(
+    footer_buttons_frame,
+    text="Fechar",
+    width=100,
+    height=36,
+    fg_color=PALETTE_SECONDARY,
+    hover_color=PALETTE_SECONDARY_HOVER,
+    text_color=PALETTE_TEXT,
+    command=fechar_programa
+)
+botao_fechar.pack(side="left")
 
 
 # ===== RODAR =====
 
+app.after(200, prompt_initial_setup)
 app.mainloop()
