@@ -1,4 +1,4 @@
 # backup_manager
-um gerenciador de backups que manda pastas de backup pro servidor (leão aço)
+Gerenciado de backups, nativamente faz backup dos arquivos da pasta origem para a pasta destino, tudo configurável.
 
-feito em python
+feito em python, ainda em desenvolvimento.
